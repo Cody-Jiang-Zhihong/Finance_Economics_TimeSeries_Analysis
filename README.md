@@ -6,7 +6,7 @@ Works on Windows/PowerShell and Mac/Linux. Includes baseline models, VAR, LSTM, 
 ---
 
 ## Dataset
-- Default location: `/mnt/data/finance_economics_dataset.csv` (update with your path if different)
+- Default location: `data/finance_economics_dataset.csv`
 - Must contain a **date** column (e.g., `date`, `Date`, `timestamp`) and numeric indicators such as prices, CPI/inflation, unemployment, interest rates, etc.
 
 **Time window:** scripts default to `2000‑01‑01` → `2008‑12‑31`
@@ -15,7 +15,7 @@ Works on Windows/PowerShell and Mac/Linux. Includes baseline models, VAR, LSTM, 
 
 ## Project Structure
 ```
-finance_econ_project/
+Finance_Economics_TimeSeries_Analysis/
 ├─ 01_data_understanding_cleaning.py
 ├─ 02_eda.py
 ├─ 03_feature_engineering.py
@@ -30,12 +30,14 @@ finance_econ_project/
 │  ├─ features.parquet / features.csv
 │  ├─ predictions/  (model outputs)
 │  └─ figures/      (PNG charts)
+├─ data/
+│  └─ finance_economics_dataset.csv
 └─ requirements.txt
 ```
 
 ---
 
-## Quickstart (Windows PowerShell)
+## Quickstart (IDE Terminal / Windows PowerShell)
 From your project root (where the scripts live):
 
 ```powershell
@@ -43,7 +45,7 @@ From your project root (where the scripts live):
 pip install -r .\requirements.txt
 
 # 1) Week 1 – Cleaning (adjust --csv if your path differs)
-python 01_data_understanding_cleaning.py --csv ".\finance_economics_dataset.csv"
+python 01_data_understanding_cleaning.py --csv "data\finance_economics_dataset.csv"
 
 # 2) Week 2 – EDA (use --monthly for macro seasonality plots)
 python 02_eda.py --monthly
@@ -53,7 +55,7 @@ python 03_feature_engineering.py
 
 # 4) Models
 #    Choose a numeric target column (see examples below)
-python 04_models.py --target "Close Price" --split_date 2007-01-01 --var_topk 4
+python 04_models.py --target 'Close Price' --split_date 2007-01-01
 
 # 5) Evaluation + viz
 python 05_evaluate_and_visualize.py
