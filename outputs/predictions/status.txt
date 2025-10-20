@@ -1,0 +1,1 @@
+Run completed. Check parquet files in this folder.

@@ -1,55 +1,49 @@
-
 #!/usr/bin/env python3
 # Author: Cody
-# Week 2: Exploratory Data Analysis (EDA) - Matplotlib only (hardened for mixed/str columns)
+# Week 2: Exploratory Data Analysis (EDA) - Hardened
 
-import argparse, os, re
+import argparse, os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from statsmodels.tsa.seasonal import seasonal_decompose
-from src.utils import to_monthly
 
 INP = "outputs/cleaned.parquet"
 OUT_FIG = "outputs/figures"
 
 def coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Try to convert object/string columns that look numeric into floats.
-       Handles commas, percent signs, and whitespace."""
+    """Convert object/string numeric-like columns to floats. Handles commas and percent signs."""
     df = df.copy()
     for c in df.columns:
         if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c]):
             s = df[c].astype(str).str.replace(r"[,\s]", "", regex=True)
-            # convert percentages like "3.2%" to 0.032
             is_pct = s.str.endswith("%")
-            s_pct = s.str.replace("%", "", regex=False)
-            num = pd.to_numeric(s_pct, errors="coerce")
-            num[is_pct] = num[is_pct] / 100.0
+            s = s.str.replace("%", "", regex=False)
+            num = pd.to_numeric(s, errors="coerce")
+            if is_pct.any():
+                num[is_pct] = num[is_pct] / 100.0
             df[c] = num
     return df
 
 def plot_series(df, cols, title, fname):
-    # Only keep columns that exist
     cols = [c for c in cols if c in df.columns]
     if not cols:
         print(f"[Warn] Skipping '{title}' — none of {cols} found.")
         return
-    # Coerce a copy to numeric
     df_plot = df[cols].copy()
     for c in df_plot.columns:
         df_plot[c] = pd.to_numeric(df_plot[c], errors="coerce")
-    # Drop columns that are all NaN after coercion
     df_plot = df_plot.dropna(how="all", axis=1)
     if df_plot.shape[1] == 0:
         print(f"[Warn] Skipping '{title}' — no numeric data after coercion.")
         return
+    os.makedirs(OUT_FIG, exist_ok=True)
     plt.figure(figsize=(10,4))
     for c in df_plot.columns:
         df_plot[c].plot(label=c)
     plt.title(title)
     plt.legend()
     plt.tight_layout()
-    os.makedirs(OUT_FIG, exist_ok=True)
     plt.savefig(os.path.join(OUT_FIG, fname))
     plt.close()
 
@@ -76,29 +70,25 @@ def plot_corr_heatmap(df, fname):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default=INP, help="Cleaned parquet path")
-    ap.add_argument("--monthly", action="store_true", help="Resample to monthly for macro decomposition")
+    ap.add_argument("--monthly", action="store_true", help="Resample to month-end for macro decomposition")
     args = ap.parse_args()
 
     os.makedirs(OUT_FIG, exist_ok=True)
-
     df = pd.read_parquet(args.input)
-    # Coerce any numeric-like object columns to floats
     df = coerce_numeric_columns(df)
 
     if args.monthly:
-        dfm = to_monthly(df)
+        dfm = df.resample("ME").mean(numeric_only=True)
         dfm.to_parquet("outputs/monthly.parquet")
     else:
         dfm = df.copy()
 
-    # Detect groups by name (case-insensitive)
-    lower_cols = {c.lower(): c for c in dfm.columns}
+    # Buckets by name
     def has_any(c, keys): return any(k in c.lower() for k in keys)
-
     gdp_cols   = [c for c in dfm.columns if has_any(c, ["gdp"])]
-    infl_cols  = [c for c in dfm.columns if has_any(c, ["infl", "cpi"])]
+    infl_cols  = [c for c in dfm.columns if has_any(c, ["infl","cpi"])]
     unemp_cols = [c for c in dfm.columns if has_any(c, ["unemp"])]
-    rate_cols  = [c for c in dfm.columns if has_any(c, ["rate","ffr","yield","treasury"])]
+    rate_cols  = [c for c in dfm.columns if has_any(c, ["rate","ffr","yield","treasury","interest"])]
     stock_cols = [c for c in dfm.columns if has_any(c, ["close","price","sp500","index","adj_close"])]
 
     plot_series(dfm, gdp_cols[:3], "GDP-related series", "gdp_series.png")
@@ -107,10 +97,8 @@ def main():
     plot_series(dfm, rate_cols[:3], "Interest rate-related series", "rates_series.png")
     plot_series(dfm, stock_cols[:3], "Stock-related series", "stocks_series.png")
 
-    # Correlation heatmap (numeric only)
     plot_corr_heatmap(dfm, "correlation_heatmap.png")
 
-    # Seasonal decomposition on first macro column (if monthly and enough data)
     try:
         macro_candidates = gdp_cols + infl_cols + unemp_cols + rate_cols
         macro_candidates = [c for c in macro_candidates if c in dfm.columns and pd.api.types.is_numeric_dtype(dfm[c])]

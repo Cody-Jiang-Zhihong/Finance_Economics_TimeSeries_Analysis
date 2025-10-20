@@ -1,39 +1,38 @@
-
 #!/usr/bin/env python3
 # Author: Cody
-# Evaluate predictions (MAE, RMSE, MAPE) and plot actual vs predicted (matplotlib)
+# Evaluate predictions (MAE, RMSE, MAPE) and plot actual vs predicted
 
 import argparse, os, glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from src.utils import compute_metrics
 
 PRED_DIR = "outputs/predictions"
 OUT_DIR = "outputs"
 
-def eval_file(path: str) -> dict:
-    df = pd.read_parquet(path)
-    # normalize column names
-    cols = [c.lower() for c in df.columns]
-    if "y_true" in cols and "y_pred" in cols:
-        y_true = df[df.columns[cols.index("y_true")]].astype(float)
-        y_pred = df[df.columns[cols.index("y_pred")]].astype(float)
-        met = compute_metrics(y_true, y_pred)
-        return met
-    else:
-        # e.g., VAR forecast over multiple columns — skip in this loop
-        return {}
+def mape(y_true, y_pred):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = np.where(y_true == 0, np.nan, y_true)
+    return np.nanmean(np.abs((y_true - y_pred) / denom)) * 100.0
+
+def compute_metrics(y_true, y_pred):
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
+    return {
+        "MAE": float(mean_absolute_error(y_true, y_pred)),
+        "RMSE": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+        "MAPE": float(mape(y_true, y_pred)),
+    }
 
 def plot_actual_vs_pred(df: pd.DataFrame, title: str, fname: str):
+    os.makedirs("outputs/figures", exist_ok=True)
     plt.figure(figsize=(10,4))
     df.iloc[:,0].plot(label="Actual")
     df.iloc[:,1].plot(label="Predicted")
     plt.title(title)
     plt.legend()
     plt.tight_layout()
-    figpath = os.path.join("outputs/figures", fname)
-    plt.savefig(figpath)
+    plt.savefig(os.path.join("outputs/figures", fname))
     plt.close()
 
 def main():
@@ -43,46 +42,45 @@ def main():
 
     os.makedirs("outputs/figures", exist_ok=True)
 
-    metrics_rows = []
+    # Try to locate features for VAR comparison
+    try:
+        truth_full = pd.read_parquet("outputs/features.parquet")
+    except Exception:
+        truth_full = None
+
+    rows = []
     for path in glob.glob(os.path.join(args.pred_dir, "*.parquet")):
         name = os.path.basename(path)
         df = pd.read_parquet(path)
 
-        # Try standard y_true/y_pred pairs
-        if set(["y_true","y_pred"]).issubset(set([c.lower() for c in df.columns])):
-            cols_lower = [c.lower() for c in df.columns]
-            actual = df[df.columns[cols_lower.index("y_true")]]
-            pred = df[df.columns[cols_lower.index("y_pred")]]
-            met = eval_file(path)
+        lower = [c.lower() for c in df.columns]
+        if "y_true" in lower and "y_pred" in lower:
+            y_true = df[df.columns[lower.index("y_true")]].astype(float)
+            y_pred = df[df.columns[lower.index("y_pred")]].astype(float)
+            met = compute_metrics(y_true, y_pred)
             met["file"] = name
-            metrics_rows.append(met)
-
-            # plot
-            plotdf = pd.concat([actual, pred], axis=1)
-            plot_actual_vs_pred(plotdf, f"Actual vs Predicted: {name}", fname=name.replace(".parquet",".png"))
-
-        # VAR forecast (multi-column) — compute columnwise metrics if we also have ground truth
+            rows.append(met)
+            plot_actual_vs_pred(pd.concat([y_true, y_pred], axis=1), f"Actual vs Predicted: {name}", name.replace(".parquet",".png"))
         else:
-            # If this is VAR output, attempt to compare against cleaned data
-            if name == "var_forecast.parquet":
-                try:
-                    truth = pd.read_parquet("outputs/features.parquet")  # contains original columns
-                    pred = df.copy()
-                    common = [c for c in pred.columns if c in truth.columns]
-                    for c in common:
-                        y_true = truth.loc[pred.index, c].astype(float).dropna()
-                        y_pred = pred.loc[y_true.index, c].astype(float)
+            # e.g., VAR forecasts
+            if truth_full is not None and name in ["var_forecast_levels.parquet", "var_forecast_diffz.parquet"]:
+                pred = df.copy()
+                common = [c for c in pred.columns if c in truth_full.columns]
+                for c in common:
+                    y_true = truth_full.loc[pred.index, c].astype(float).dropna()
+                    y_pred = pred.loc[y_true.index, c].astype(float)
+                    if len(y_true) > 0 and len(y_pred) > 0:
                         met = compute_metrics(y_true, y_pred)
-                        met["file"] = f"var_{c}"
-                        metrics_rows.append(met)
+                        met["file"] = f"{name.replace('.parquet','')}_{c}"
+                        rows.append(met)
+                        plot_actual_vs_pred(pd.concat([y_true, y_pred], axis=1), f"{name.replace('.parquet','').upper()}: {c}", f"{name.replace('.parquet','')}_{c}.png")
 
-                        plot_actual_vs_pred(pd.concat([y_true, y_pred], axis=1), f"VAR Forecast: {c}", f"var_{c}.png")
-                except Exception as e:
-                    print("[Warn] VAR evaluation skipped:", e)
-
-    metrics_df = pd.DataFrame(metrics_rows)
-    metrics_df.to_csv(os.path.join(OUT_DIR, "metrics_summary.csv"), index=False)
-    print("[OK] Wrote metrics to outputs/metrics_summary.csv and saved figures to outputs/figures")
+    metrics_df = pd.DataFrame(rows)
+    if len(metrics_df) > 0:
+        metrics_df.to_csv(os.path.join(OUT_DIR, "metrics_summary.csv"), index=False)
+        print("[OK] Wrote metrics to outputs/metrics_summary.csv and saved figures to outputs/figures")
+    else:
+        print("[Info] No evaluable prediction files found under outputs/predictions")
 
 if __name__ == "__main__":
     main()

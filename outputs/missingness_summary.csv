@@ -1,24 +1,24 @@
-,missing_count,missing_pct
-Stock Index,0,0.0
-Corporate Profits (Billion USD),0,0.0
-Venture Capital Funding (Billion USD),0,0.0
-Mergers & Acquisitions Deals,0,0.0
-Bankruptcy Rate (%),0,0.0
-Retail Sales (Billion USD),0,0.0
-Real Estate Index,0,0.0
-Gold Price (USD per Ounce),0,0.0
-Crude Oil Price (USD per Barrel),0,0.0
-Forex USD/JPY,0,0.0
-Forex USD/EUR,0,0.0
-Government Debt (Billion USD),0,0.0
-Open Price,0,0.0
-Consumer Confidence Index,0,0.0
-Interest Rate (%),0,0.0
-Unemployment Rate (%),0,0.0
-Inflation Rate (%),0,0.0
-GDP Growth (%),0,0.0
-Trading Volume,0,0.0
-Daily Low,0,0.0
-Daily High,0,0.0
-Close Price,0,0.0
-Consumer Spending (Billion USD),0,0.0
+,missing_count,missing_pct,largest_nan_gap
+Stock Index,3000,100.0,3000
+Corporate Profits (Billion USD),0,0.0,0
+Venture Capital Funding (Billion USD),0,0.0,0
+Mergers & Acquisitions Deals,0,0.0,0
+Bankruptcy Rate (%),0,0.0,0
+Retail Sales (Billion USD),0,0.0,0
+Real Estate Index,0,0.0,0
+Gold Price (USD per Ounce),0,0.0,0
+Crude Oil Price (USD per Barrel),0,0.0,0
+Forex USD/JPY,0,0.0,0
+Forex USD/EUR,0,0.0,0
+Government Debt (Billion USD),0,0.0,0
+Open Price,0,0.0,0
+Consumer Confidence Index,0,0.0,0
+Interest Rate (%),0,0.0,0
+Unemployment Rate (%),0,0.0,0
+Inflation Rate (%),0,0.0,0
+GDP Growth (%),0,0.0,0
+Trading Volume,0,0.0,0
+Daily Low,0,0.0,0
+Daily High,0,0.0,0
+Close Price,0,0.0,0
+Consumer Spending (Billion USD),0,0.0,0
