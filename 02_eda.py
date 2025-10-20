@@ -114,6 +114,40 @@ def main():
     except Exception as e:
         print("[Warn] Seasonal decomposition skipped:", e)
 
+    //Rajdeep Commit//
+        # --- ACF & PACF plots for series ---
+    from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+    keywords = ["gdp", "infl", "unemp", "rate"]
+    for key in keywords:
+        match = [c for c in dfm.columns if key.lower() in c.lower()]
+        if not match:
+            print(f"[Info] No match for '{key}'")
+            continue
+        col = match[0]
+
+        series = pd.to_numeric(dfm[col], errors='coerce').dropna()
+        series = series.resample('M').mean().interpolate()
+
+        if len(series) < 24:
+            print(f"[Warn] Skipping {col} (too few data points).")
+            continue
+
+        print(f"[OK] ACF/PACF: {col}")
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        plot_acf(series, ax=axes[0], lags=40)
+        axes[0].set_title(f"ACF: {col}")
+        plot_pacf(series, ax=axes[1], lags=40, method='ywm')
+        axes[1].set_title(f"PACF: {col}")
+        for ax in axes:
+            ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))  # Show more y-ticks
+        plt.tight_layout()
+
+        os.makedirs(OUT_FIG, exist_ok=True)
+        plt.savefig(os.path.join(OUT_FIG, f"acf_pacf_{col}.png"))
+        plt.close()
+
     print("[OK] EDA figures saved to outputs/figures")
 
 if __name__ == "__main__":
