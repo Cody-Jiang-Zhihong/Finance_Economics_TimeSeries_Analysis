@@ -67,6 +67,52 @@ def plot_corr_heatmap(df, fname):
     plt.savefig(os.path.join(OUT_FIG, fname))
     plt.close()
 
+def plot_cross_correlation(df, col_x, col_y, max_lag=24, fname="ccf.png"):
+    """
+    Plot cross-correlation function between two series with lags from -max_lag to +max_lag.
+    """
+    if col_x not in df.columns or col_y not in df.columns:
+        print(f"[Warn] Cross-corr skipped — {col_x} or {col_y} not in columns.")
+        return
+
+    s1 = pd.to_numeric(df[col_x], errors="coerce").dropna()
+    s2 = pd.to_numeric(df[col_y], errors="coerce").dropna()
+
+    common_idx = s1.index.intersection(s2.index)
+    s1, s2 = s1.loc[common_idx], s2.loc[common_idx]
+
+    if len(s1) < max_lag * 2:
+        print("[Warn] Cross-corr skipped — series too short.")
+        return
+
+    s1 = (s1 - s1.mean()) / s1.std(ddof=0)
+    s2 = (s2 - s2.mean()) / s2.std(ddof=0)
+
+    lags = range(-max_lag, max_lag + 1)
+    ccs = []
+    for k in lags:
+        if k < 0:
+            # s1 leads, s2 lags
+            cc = (s1[:k] * s2[-k:]).mean()
+        elif k > 0:
+            # s2 leads, s1 lags
+            cc = (s1[k:] * s2[:-k]).mean()
+        else:
+            cc = (s1 * s2).mean()
+        ccs.append(cc)
+
+    os.makedirs(OUT_FIG, exist_ok=True)
+    plt.figure(figsize=(10,4))
+    plt.stem(list(lags), ccs, use_line_collection=True)
+    plt.axhline(0, linestyle="--")
+    plt.title(f"Cross-correlation: {col_x} vs {col_y}")
+    plt.xlabel("Lag (days)")
+    plt.ylabel("Correlation")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUT_FIG, fname))
+    plt.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default=INP, help="Cleaned parquet path")
@@ -114,7 +160,7 @@ def main():
     except Exception as e:
         print("[Warn] Seasonal decomposition skipped:", e)
 
-    //Rajdeep Commit//
+    #//Rajdeep Commit//
         # --- ACF & PACF plots for series ---
     from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
@@ -127,7 +173,7 @@ def main():
         col = match[0]
 
         series = pd.to_numeric(dfm[col], errors='coerce').dropna()
-        series = series.resample('M').mean().interpolate()
+        series = series.resample('ME').mean().interpolate()
 
         if len(series) < 24:
             print(f"[Warn] Skipping {col} (too few data points).")
@@ -147,6 +193,19 @@ def main():
         os.makedirs(OUT_FIG, exist_ok=True)
         plt.savefig(os.path.join(OUT_FIG, f"acf_pacf_{col}.png"))
         plt.close()
+        
+        # --- Cross-correlation: one macro vs one stock (if available) ---
+        if stock_cols and rate_cols:
+            cc_x, cc_y = rate_cols[0], stock_cols[0]
+            print(f"[OK] Cross-corr between {cc_x} (rates) and {cc_y} (stocks)")
+            plot_cross_correlation(dfm, cc_x, cc_y, max_lag=12, fname="ccf_rates_vs_stocks.png")
+        elif stock_cols and infl_cols:
+            cc_x, cc_y = infl_cols[0], stock_cols[0]
+            print(f"[OK] Cross-corr between {cc_x} (inflation) and {cc_y} (stocks)")
+            plot_cross_correlation(dfm, cc_x, cc_y, max_lag=12, fname="ccf_infl_vs_stocks.png")
+        else:
+            print("[Info] No suitable pair for cross-correlation found.")
+
 
     print("[OK] EDA figures saved to outputs/figures")
 
