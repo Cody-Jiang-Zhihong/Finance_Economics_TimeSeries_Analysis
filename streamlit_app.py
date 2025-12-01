@@ -318,6 +318,135 @@ def main():
                 ax.legend(loc="best")
                 st.pyplot(fig)
 
+# streamlit_app.py
+from src.macro_analysis import (
+    load_raw, resample_to_monthly, classify_business_cycle, consumer_spending_momentum,
+    labor_market_metrics, inflation_and_real_retail, plot_corr_heatmap, plot_dual_panel_retail,
+    plot_lag_series, plot_lead_lag_heatmap, phase_summary_stats, lagged_phase_means, anova_tests,
+    correlation_matrix
+)
+
+st.set_page_config(layout="wide", page_title="Macro Analysis", initial_sidebar_state="expanded")
+
+st.title("Macroeconomic Analysis — Consumer-driven & Phase Diagnostics")
+
+# ---------------------------
+# Load & prepare data (cached)
+# ---------------------------
+@st.cache_data
+def load_and_prepare():
+    df_raw = load_raw()  # reads outputs/cleaned.parquet or cleaned.csv
+    monthly = resample_to_monthly(df_raw)
+    monthly = classify_business_cycle(monthly)
+    monthly = consumer_spending_momentum(monthly)
+    monthly = labor_market_metrics(monthly)
+    monthly = inflation_and_real_retail(monthly)
+    return monthly
+
+monthly = load_and_prepare()
+
+# Sidebar controls
+st.sidebar.header("Controls")
+plot_choice = st.sidebar.selectbox("Choose a visualization or analysis",
+    [
+        "Correlation Matrix",
+        "Compare Retail vs Variable",
+        "Lagged Correlation (pair)",
+        "Lead-Lag Matrix (predictor)",
+        "Business Cycle Summary",
+        "Phase Lagged Means",
+        "ANOVA tests",
+        "Raw monthly data"
+    ])
+
+# Common UI elements
+if plot_choice == "Correlation Matrix":
+    st.header("Correlation Matrix (monthly)")
+    fig = plot_corr_heatmap(monthly)
+    st.pyplot(fig)
+
+    # short auto-text summary
+    corr = correlation_matrix(monthly)
+    # find top positive and negative off-diagonal
+    corr_vals = corr.copy()
+    for c in corr_vals.columns:
+        corr_vals.loc[c,c] = np.nan
+    top_pos = corr_vals.stack().idxmax()
+    top_pos_val = corr_vals.stack().max()
+    top_neg = corr_vals.stack().idxmin()
+    top_neg_val = corr_vals.stack().min()
+    st.markdown("**Quick takeaways:**")
+    st.write(f"- Strongest positive pair: **{top_pos[0]}** vs **{top_pos[1]}** (corr={top_pos_val:.3f})")
+    st.write(f"- Strongest negative pair: **{top_neg[0]}** vs **{top_neg[1]}** (corr={top_neg_val:.3f})")
+
+elif plot_choice == "Compare Retail vs Variable":
+    st.header("Retail Sales (two-panel) comparisons")
+    var = st.selectbox("Select variable to compare with Retail Sales", 
+                       ["GDP Growth (%)","Inflation Rate (%)","Unemployment Rate (%)","Consumer Confidence Index","Real Retail Sales","Retail Sales MoM %","Confidence MoM %"])
+    fig = plot_dual_panel_retail(monthly, var)
+    st.pyplot(fig)
+
+elif plot_choice == "Lagged Correlation (pair)":
+    st.header("Lagged correlation (lead-lag series)")
+    pred = st.selectbox("Predictor", ["Consumer Confidence Index","Retail Sales (Billion USD)"])
+    tgt = st.selectbox("Target", ["GDP Growth (%)","Unemployment Rate (%)","Inflation Rate (%)"])
+    max_lag = st.slider("Max lag (months)", 1, 24, 12)
+    fig, s = plot_lag_series(monthly[pred], monthly[tgt], max_lag=max_lag)
+    st.pyplot(fig)
+    st.write("Lagged correlations (lag=0..max):")
+    st.dataframe(s.rename("correlation").to_frame())
+
+elif plot_choice == "Lead-Lag Matrix (predictor)":
+    st.header("Lead-Lag matrix (predictor → targets)")
+    pred = st.selectbox("Predictor", ["Consumer Confidence Index","Retail Sales (Billion USD)"])
+    max_lag = st.slider("Max lag (months)", 1, 24, 12)
+    targets = ["GDP Growth (%)","Unemployment Rate (%)","Inflation Rate (%)"]
+    fig, mat = plot_lead_lag_heatmap(monthly, pred, targets, max_lag=max_lag)
+    st.pyplot(fig)
+    st.write("Numeric lead-lag matrix (%)")
+    st.dataframe(mat.round(3))
+
+elif plot_choice == "Business Cycle Summary":
+    st.header("Business Cycle Phases")
+    vc = monthly["Phase"].value_counts()
+    st.bar_chart(vc)
+    st.write("Counts by phase:")
+    st.dataframe(vc)
+    st.markdown("### Phase sample table (latest 12 months)")
+    st.dataframe(monthly[["Phase","GDP Growth (%)","Unemployment Rate (%)","Consumer Confidence Index"]].tail(12))
+    # automated summary
+    st.markdown("### Quick interpretation")
+    st.write(f"- Most frequent phases: **{vc.index[0]}** ({vc.iloc[0]} months), **{vc.index[1]}** ({vc.iloc[1]} months).")
+    st.write("- Use 'Phase Lagged Means' to inspect which indicators moved *before* each phase.")
+
+elif plot_choice == "Phase Lagged Means":
+    st.header("Lagged indicator means by Phase (leading signals)")
+    lags = st.multiselect("Select lags (months) to show", [1,2,3,6], default=[1,3,6])
+    results = {}
+    for lag in lags:
+        results[lag] = lagged_phase_means(monthly, lags=[lag])[lag]
+        st.markdown(f"#### {lag}-month lead")
+        st.dataframe(results[lag].round(3))
+    st.markdown("### How to read: the table shows average indicator values _lag_ months before the phase label.")
+
+elif plot_choice == "ANOVA tests":
+    st.header("ANOVA: Do indicator means differ across Phases?")
+    res = anova_tests(monthly)
+    rows = []
+    for k,v in res.items():
+        f,p = v
+        rows.append({"indicator":k,"F-stat":f,"p-value":p,"significant": (p is not None and p<0.05)})
+    df_res = pd.DataFrame(rows).set_index("indicator")
+    st.dataframe(df_res)
+    st.markdown("**Interpretation:** p-value < 0.05 suggests the indicator's mean differs across phases.")
+
+elif plot_choice == "Raw monthly data":
+    st.header("Raw monthly data (sample)")
+    st.dataframe(monthly)
+
+# bottom: helpful notes
+st.markdown("---")
+st.markdown("**Notes:**\n- Data loaded from `outputs/cleaned.parquet` (preferred) or `outputs/cleaned.csv`.\n- Frequency converted to month-end; classification is rule-based and simplified for exploration.")
 
 if __name__ == "__main__":
     main()
