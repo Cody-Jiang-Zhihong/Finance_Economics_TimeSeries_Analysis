@@ -144,23 +144,109 @@ def main():
                         lr_pred = pd.Series(lr.predict(X_test), index=X_test.index)
                         pd.DataFrame({"y_true": y_test.loc[lr_pred.index], "y_pred": lr_pred}).to_parquet(os.path.join(OUT_DIR, f"linlags_{target}.parquet"))
 
-                # LSTM (optional)
+                # LSTM (fixed: proper scaling + clean date comparison + time-series-aware training)
                 if TF_OK:
                     try:
-                        X, y = build_sequences(series.astype(float).dropna(), lookback=args.lookback, horizon=1)
-                        dates = series.index[args.lookback:args.lookback+len(y)]
-                        X_train, y_train_dl = X[dates < np.datetime64(args.split_date)], y[dates < np.datetime64(args.split_date)]
-                        X_test, y_test_dl = X[dates >= np.datetime64(args.split_date)], y[dates >= np.datetime64(args.split_date)]
-                        dates_test = dates[dates >= np.datetime64(args.split_date)]
-                        if len(X_train) > 50 and len(X_test) > 0:
-                            model = Sequential([LSTM(32, input_shape=(X_train.shape[1], 1)), Dense(1)])
-                            model.compile(optimizer="adam", loss="mse")
-                            cb = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
-                            model.fit(X_train[..., None], y_train_dl, validation_split=0.2, epochs=args.epochs, batch_size=args.batch, callbacks=[cb], verbose=0)
-                            y_pred_dl = model.predict(X_test[..., None], verbose=0).ravel()
-                            pd.DataFrame({"y_true": y_test_dl, "y_pred": y_pred_dl}, index=dates_test).to_parquet(os.path.join(OUT_DIR, f"lstm_{target}.parquet"))
+                        # 1) Full series, sorted, no NaNs
+                        series_full = df[target].astype(float).sort_index().dropna()
+
+                        # Use pandas Timestamp, not datetime.date / np.datetime64 mix
+                        split_dt = pd.to_datetime(args.split_date)
+
+                        series_train = series_full[series_full.index < split_dt]
+                        series_test  = series_full[series_full.index >= split_dt]
+
+                        # Need enough points to build sequences
+                        if len(series_train) > args.lookback + 10 and len(series_test) > 0:
+                            # 2) Scale using TRAIN stats only
+                            mu = series_train.mean()
+                            sigma = series_train.std()
+                            if sigma == 0 or np.isnan(sigma):
+                                sigma = 1.0
+
+                            series_train_s = (series_train - mu) / sigma
+                            series_test_s  = (series_test - mu) / sigma
+
+                            def make_sequences(s: pd.Series, lookback: int):
+                                vals = s.values.astype("float32")
+                                Xs, ys, idxs = [], [], []
+                                for i in range(lookback, len(vals)):
+                                    Xs.append(vals[i - lookback:i])
+                                    ys.append(vals[i])
+                                    idxs.append(s.index[i])
+                                return np.array(Xs), np.array(ys), np.array(idxs)
+
+                            # 3) Build training sequences
+                            X_train_dl, y_train_dl, dates_train = make_sequences(
+                                series_train_s, args.lookback
+                            )
+
+                            # 4) Build test sequences with train tail as context
+                            tail_for_context = series_train_s.iloc[-args.lookback:]
+                            test_with_context = pd.concat([tail_for_context, series_test_s])
+                            X_all_test, y_all_test, dates_all_test = make_sequences(
+                                test_with_context, args.lookback
+                            )
+
+                            # Keep only the sequences whose target date >= split_dt (true test)
+                            mask_test = dates_all_test >= split_dt
+                            X_test_dl  = X_all_test[mask_test]
+                            y_test_dl  = y_all_test[mask_test]
+                            dates_test = dates_all_test[mask_test]
+
+                            if len(X_train_dl) > 50 and len(X_test_dl) > 0:
+                                model = Sequential(
+                                    [
+                                        LSTM(32, input_shape=(X_train_dl.shape[1], 1)),
+                                        Dense(1),
+                                    ]
+                                )
+                                model.compile(optimizer="adam", loss="mse")
+
+                                # Time-based validation: last 10% of training data
+                                val_idx = int(len(X_train_dl) * 0.9)
+                                X_tr, X_val = X_train_dl[:val_idx], X_train_dl[val_idx:]
+                                y_tr, y_val = y_train_dl[:val_idx], y_train_dl[val_idx:]
+
+                                cb = EarlyStopping(
+                                    monitor="val_loss",
+                                    patience=5,
+                                    restore_best_weights=True,
+                                )
+
+                                model.fit(
+                                    X_tr[..., None],
+                                    y_tr,
+                                    validation_data=(X_val[..., None], y_val),
+                                    epochs=args.epochs,
+                                    batch_size=args.batch,
+                                    callbacks=[cb],
+                                    verbose=0,
+                                    shuffle=False,  # critical for time series
+                                )
+
+                                # 5) Predict in scaled space, then unscale
+                                y_pred_scaled = model.predict(X_test_dl[..., None], verbose=0).ravel()
+                                y_true_scaled = y_test_dl
+
+                                y_pred = y_pred_scaled * sigma + mu
+                                y_true = y_true_scaled * sigma + mu
+
+                                pd.DataFrame(
+                                    {"y_true": y_true, "y_pred": y_pred},
+                                    index=dates_test,
+                                ).to_parquet(
+                                    os.path.join(OUT_DIR, f"lstm_{target}.parquet")
+                                )
+                                print(f"[OK] LSTM predictions saved for {target}")
+                            else:
+                                print("[Warn] Not enough sequences for LSTM after splitting.")
+                        else:
+                            print("[Warn] Not enough data for LSTM (train/test) on target:", target)
                     except Exception as e:
                         print("[Warn] LSTM training skipped:", e)
+
+
         else:
             print("[Warn] Target series too short for univariate models.")
     else:
